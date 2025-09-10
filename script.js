@@ -1,281 +1,382 @@
-// Paystack API Keys
-const PAYSTACK_SECRET_KEY = 'sk_test_6712d1ce8ebdea50b14a16c8fcbe9619391338bb';
-const PAYSTACK_PUBLIC_KEY = 'pk_test_7f1f42fd10b5c1f0a6e10c746bd5804eb43224ef';
+// Paystack API Keys (Test keys)
+        const PAYSTACK_PUBLIC_KEY = 'pk_test_7f1f42fd10b5c1f0a6e10c746bd5804eb43224ef';
 
-// App State
-let cart = [];
-let userAuthorizationCode = null;
-let userEmail = 'customer@example.com';
-let currentOrderReference = null;
-let currentTotalAmount = 0;
-let currentPaymentMethod = null;
-let testScenario = 'random'; // 'random', 'card_fail', 'funds_fail', 'both_success'
+        // App State
+        let cart = [];
+        let userAuthorizationCode = null;
+        let currentOrderReference = null;
+        let currentTotalAmount = 0;
+        let currentPaymentMethod = null;
+        let preauthorizationReference = null;
 
-// --- Test Control Functions ---
-function setTestScenario(scenario) {
-    testScenario = scenario;
-    const testStatus = document.getElementById('test-status');
-    
-    switch(scenario) {
-        case 'card_fail':
-            testStatus.textContent = 'Current test mode: Card verification will fail';
-            testStatus.className = 'status-message error';
-            break;
-        case 'funds_fail':
-            testStatus.textContent = 'Current test mode: Funds verification will fail';
-            testStatus.className = 'status-message error';
-            break;
-        case 'both_success':
-            testStatus.textContent = 'Current test mode: Both verifications will succeed';
-            testStatus.className = 'status-message success';
-            break;
-        default:
-            testStatus.textContent = 'Current test mode: Random outcomes';
-            testStatus.className = 'status-message info';
-    }
-    
-    showNotification(`Test scenario set to: ${scenario}`);
-}
+        // Initialize with empty cart
+        document.addEventListener('DOMContentLoaded', function() {
+            updateCartDisplay();
+            
+            // Format card number input
+            document.getElementById('card-number').addEventListener('input', function(e) {
+                let value = e.target.value.replace(/\D/g, '');
+                if (value.length > 16) value = value.slice(0, 16);
+                value = value.replace(/(\d{4})/g, '$1 ').trim();
+                e.target.value = value;
+            });
+            
+            // Format expiry date input
+            document.getElementById('card-expiry').addEventListener('input', function(e) {
+                let value = e.target.value.replace(/\D/g, '');
+                if (value.length > 4) value = value.slice(0, 4);
+                if (value.length > 2) {
+                    value = value.slice(0, 2) + '/' + value.slice(2);
+                }
+                e.target.value = value;
+            });
+        });
 
-function resetTestScenario() {
-    testScenario = 'random';
-    document.getElementById('test-status').textContent = 'Current test mode: Random outcomes';
-    document.getElementById('test-status').className = 'status-message info';
-    showNotification('Test scenario reset to random outcomes');
-}
+        // Modal functions
+        function showModal() {
+            document.getElementById('modal-total-amount').textContent = currentTotalAmount.toFixed(2);
+            document.getElementById('paymentOptionsModal').style.display = 'block';
+        }
 
-// --- Modal Functions ---
-function showModal() {
-    document.getElementById('modal-total-amount').textContent = currentTotalAmount;
-    document.getElementById('paymentModal').style.display = 'block';
-}
+        function closeModal() {
+            document.getElementById('paymentOptionsModal').style.display = 'none';
+        }
 
-function closeModal() {
-    document.getElementById('paymentModal').style.display = 'none';
-}
-
-// --- Core Application Functions ---
-function addToCart(name, price) {
-    cart.push({ name, price });
-    updateCartDisplay();
-    showNotification(`${name} added to cart!`);
-}
-
-function updateCartDisplay() {
-    const cartItemsElement = document.getElementById('cart-items');
-    const cartTotalElement = document.getElementById('cart-total');
-    const grandTotalElement = document.getElementById('grand-total');
-
-    if (cart.length === 0) {
-        cartItemsElement.innerHTML = '<p>Your cart is empty</p>';
-    } else {
-        cartItemsElement.innerHTML = cart.map(item => `
-            <div class="cart-item">
-                <span>${item.name}</span>
-                <span>R ${item.price.toFixed(2)}</span>
-            </div>
-        `).join('');
-    }
-
-    const subtotal = cart.reduce((sum, item) => sum + item.price, 0);
-    const deliveryFee = 35;
-    const grandTotal = subtotal + deliveryFee;
-
-    cartTotalElement.textContent = subtotal.toFixed(2);
-    grandTotalElement.textContent = grandTotal.toFixed(2);
-}
-
-function showNotification(message) {
-    // Create notification element
-    const notification = document.createElement('div');
-    notification.textContent = message;
-    notification.style.position = 'fixed';
-    notification.style.top = '20px';
-    notification.style.right = '20px';
-    notification.style.padding = '10px 20px';
-    notification.style.background = '#00b14d';
-    notification.style.color = 'white';
-    notification.style.borderRadius = '5px';
-    notification.style.zIndex = '1000';
-    notification.style.boxShadow = '0 4px 12px rgba(0, 0, 0, 0.1)';
-    
-    document.body.appendChild(notification);
-    
-    // Remove notification after 3 seconds
-    setTimeout(() => {
-        document.body.removeChild(notification);
-    }, 3000);
-}
-
-// --- Checkout & Payment Functions ---
-function checkout() {
-    if (cart.length === 0) {
-        alert("Your cart is empty!");
-        return;
-    }
-    const subtotal = cart.reduce((sum, item) => sum + item.price, 0);
-    const deliveryFee = 35;
-    currentTotalAmount = (subtotal + deliveryFee).toFixed(2);
-
-    // Show the payment options modal
-    showModal();
-}
-
-function handlePaymentChoice(choice) {
-    closeModal();
-    currentPaymentMethod = choice;
-
-    if (choice === 'paynow') {
-        payNowCheckout(currentTotalAmount);
-    } else if (choice === 'pod') {
-        payWithPod(currentTotalAmount);
-    } else if (choice === 'cancel') {
-        showNotification("Order cancelled.");
-    }
-}
-
-function payNowCheckout(totalAmount) {
-    updateOrderStatus('Processing payment...', 'info');
-    
-    const handler = PaystackPop.setup({
-        key: PAYSTACK_PUBLIC_KEY,
-        email: userEmail,
-        amount: totalAmount * 100, // Convert to cents
-        currency: 'ZAR',
-        ref: 'PY_' + Math.floor((Math.random() * 1000000000) + 1),
-        onClose: function() {
-            updateOrderStatus('Payment was cancelled.', 'error');
-        },
-        callback: function(response) {
-            if (response.status === 'success') {
-                updateOrderStatus('Payment successful! Your order is being processed.', 'success');
-                document.getElementById('deliver-btn').disabled = false;
-                showNotification('Payment processed successfully!');
-            } else {
-                updateOrderStatus('Payment failed. Please try again.', 'error');
+        // Close modal if user clicks outside of it
+        window.onclick = function(event) {
+            const modal = document.getElementById('paymentOptionsModal');
+            if (event.target === modal) {
+                closeModal();
             }
         }
-    });
-    handler.openIframe();
-}
 
-function payWithPod(totalAmount) {
-    updateOrderStatus('Starting POD verification process...', 'info');
-    document.getElementById('verification-process').style.display = 'block';
-    
-    // Show verification steps
-    const cardIcon = document.getElementById('card-verification-icon');
-    const fundsIcon = document.getElementById('funds-verification-icon');
-    
-    // Reset icons
-    cardIcon.textContent = '⏳';
-    cardIcon.className = 'verification-icon step-pending';
-    fundsIcon.textContent = '⏳';
-    fundsIcon.className = 'verification-icon step-pending';
-    
-    // Step 1: Card verification
-    setTimeout(() => {
-        cardIcon.textContent = '🔍';
-        cardIcon.className = 'verification-icon step-pending';
-        updateOrderStatus('Verifying card validity...', 'info');
-        
-        // Simulate card verification
-        setTimeout(() => {
-            let cardValid;
+        // Product quantity functions
+        function increaseQuantity(productId) {
+            const input = document.getElementById(`${productId}-quantity`);
+            input.value = parseInt(input.value) + 1;
+        }
+
+        function decreaseQuantity(productId) {
+            const input = document.getElementById(`${productId}-quantity`);
+            if (parseInt(input.value) > 0) {
+                input.value = parseInt(input.value) - 1;
+            }
+        }
+
+        // --- Cart Functions ---
+        function addToCart(productId, name, price) {
+            const quantity = parseInt(document.getElementById(`${productId}-quantity`).value);
             
-            // Determine outcome based on test scenario
-            if (testScenario === 'card_fail' || testScenario === 'both_success') {
-                cardValid = (testScenario === 'both_success');
-            } else {
-                cardValid = Math.random() > 0.1; // 90% success rate by default
+            if (quantity <= 0) {
+                showNotification('Please select at least 1 item', false);
+                return;
             }
             
-            if (cardValid) {
-                cardIcon.textContent = '✅';
-                cardIcon.className = 'verification-icon step-completed';
-                updateOrderStatus('Card verification successful! Checking funds...', 'info');
+            // Check if product already in cart
+            const existingItemIndex = cart.findIndex(item => item.id === productId);
+            
+            if (existingItemIndex >= 0) {
+                // Update quantity if product already in cart
+                cart[existingItemIndex].quantity += quantity;
+            } else {
+                // Add new product to cart
+                cart.push({
+                    id: productId,
+                    name: name,
+                    price: price,
+                    quantity: quantity
+                });
+            }
+            
+            // Reset quantity input
+            document.getElementById(`${productId}-quantity`).value = 0;
+            
+            updateCartDisplay();
+            showNotification(`${quantity} ${name} added to cart!`);
+        }
+
+        function removeFromCart(productId) {
+            cart = cart.filter(item => item.id !== productId);
+            updateCartDisplay();
+        }
+
+        function updateCartItemQuantity(productId, change) {
+            const item = cart.find(item => item.id === productId);
+            if (item) {
+                item.quantity += change;
+                if (item.quantity <= 0) {
+                    removeFromCart(productId);
+                } else {
+                    updateCartDisplay();
+                }
+            }
+        }
+
+        function updateCartDisplay() {
+            const cartItemsElement = document.getElementById('cart-items');
+            const cartSubtotalElement = document.getElementById('cart-subtotal');
+            const taxAmountElement = document.getElementById('tax-amount');
+            const grandTotalElement = document.getElementById('grand-total');
+            const checkoutBtn = document.getElementById('checkout-btn');
+
+            if (cart.length === 0) {
+                cartItemsElement.innerHTML = `
+                    <div class="empty-cart">
+                        <i class="fas fa-shopping-cart"></i>
+                        <p>Your cart is empty</p>
+                    </div>
+                `;
+                cartSubtotalElement.textContent = '0.00';
+                taxAmountElement.textContent = '0.00';
+                grandTotalElement.textContent = '0.00';
+                checkoutBtn.disabled = true;
+                return;
+            }
+
+            // Build cart items display
+            cartItemsElement.innerHTML = cart.map(item => `
+                <div class="cart-item">
+                    <div class="cart-item-info">
+                        <strong>${item.name}</strong>
+                        <div>R ${item.price.toFixed(2)} each</div>
+                    </div>
+                    <div class="cart-item-quantity">
+                        <button class="quantity-btn" onclick="updateCartItemQuantity('${item.id}', -1)">-</button>
+                        <span>${item.quantity}</span>
+                        <button class="quantity-btn" onclick="updateCartItemQuantity('${item.id}', 1)">+</button>
+                        <span class="remove-item" onclick="removeFromCart('${item.id}')">
+                            <i class="fas fa-trash"></i>
+                        </span>
+                    </div>
+                    <div class="cart-item-price">
+                        R ${(item.price * item.quantity).toFixed(2)}
+                    </div>
+                </div>
+            `).join('');
+
+            // Calculate totals
+            const subtotal = cart.reduce((sum, item) => sum + (item.price * item.quantity), 0);
+            const deliveryFee = 35;
+            const tax = subtotal * 0.15;
+            const grandTotal = subtotal + deliveryFee + tax;
+
+            // Update display
+            cartSubtotalElement.textContent = subtotal.toFixed(2);
+            taxAmountElement.textContent = tax.toFixed(2);
+            grandTotalElement.textContent = grandTotal.toFixed(2);
+            
+            // Enable checkout button
+            checkoutBtn.disabled = false;
+            
+            // Store the total amount
+            currentTotalAmount = grandTotal;
+        }
+
+        function showNotification(message, isSuccess = true) {
+            // Create notification element
+            const notification = document.createElement('div');
+            notification.textContent = message;
+            notification.style.position = 'fixed';
+            notification.style.top = '20px';
+            notification.style.right = '20px';
+            notification.style.padding = '10px 20px';
+            notification.style.background = isSuccess ? '#00b14d' : '#e74c3c';
+            notification.style.color = 'white';
+            notification.style.borderRadius = '5px';
+            notification.style.zIndex = '1000';
+            notification.style.boxShadow = '0 4px 12px rgba(0, 0, 0, 0.1)';
+            
+            document.body.appendChild(notification);
+            
+            // Remove notification after 3 seconds
+            setTimeout(() => {
+                if (document.body.contains(notification)) {
+                    document.body.removeChild(notification);
+                }
+            }, 3000);
+        }
+
+        function checkout() {
+            if (cart.length === 0) {
+                showNotification("Your cart is empty!", false);
+                return;
+            }
+            
+            // Show payment options modal
+            showModal();
+        }
+
+        function handlePaymentChoice(choice) {
+            closeModal();
+            currentPaymentMethod = choice;
+
+            if (choice === 'paynow') {
+                document.getElementById('order-status').innerHTML = '<p>Pay Now selected. Please enter your card details.</p>';
+                document.getElementById('order-status').className = 'status-message info';
+                showCardForm();
+            } else if (choice === 'pod') {
+                document.getElementById('order-status').innerHTML = '<p>Pay on Delivery selected. Please enter your card details to reserve funds.</p>';
+                document.getElementById('order-status').className = 'status-message info';
+                showCardForm();
+            } else if (choice === 'cancel') {
+                document.getElementById('order-status').innerHTML = '<p>Payment cancelled.</p>';
+                document.getElementById('order-status').className = 'status-message error';
+                showNotification("Order cancelled.");
+            }
+        }
+
+        function showCardForm() {
+            document.getElementById('card-form').style.display = 'block';
+            // Scroll to card form
+            document.getElementById('card-form').scrollIntoView({ behavior: 'smooth' });
+        }
+
+        function hideCardForm() {
+            document.getElementById('card-form').style.display = 'none';
+            document.getElementById('order-status').innerHTML = '<p>Payment cancelled</p>';
+            document.getElementById('order-status').className = 'status-message error';
+        }
+
+        function processPayment() {
+            const cardNumber = document.getElementById('card-number').value.replace(/\s/g, '');
+            const cardholderName = document.getElementById('cardholder-name').value;
+            const cardExpiry = document.getElementById('card-expiry').value;
+            const cardCvv = document.getElementById('card-cvv').value;
+            const cardEmail = document.getElementById('card-email').value;
+
+            // Validate inputs
+            if (!cardNumber || !cardholderName || !cardExpiry || !cardCvv || !cardEmail) {
+                showNotification('Please fill in all card details', false);
+                return;
+            }
+
+            if (cardNumber.length < 16) {
+                showNotification('Please enter a valid card number', false);
+                return;
+            }
+
+            // Show processing UI
+            document.getElementById('card-form').style.display = 'none';
+            document.getElementById('verification-process').style.display = 'block';
+            document.getElementById('processingOverlay').style.display = 'flex';
+            
+            if (currentPaymentMethod === 'pod') {
+                document.getElementById('pod-step').style.display = 'flex';
+                document.getElementById('processingText').textContent = 'Processing Pay on Delivery request...';
+            } else {
+                document.getElementById('processingText').textContent = 'Processing your payment...';
+            }
+
+            // Simulate verification steps with delays
+            simulateVerificationProcess();
+        }
+
+        function simulateVerificationProcess() {
+            // Step 1: Validating card details
+            setTimeout(() => {
+                document.getElementById('verification-icon-1').textContent = '✅';
+                document.getElementById('verification-icon-1').className = 'verification-icon step-completed';
                 
-                // Step 2: Funds verification
-                fundsIcon.textContent = '🔍';
-                fundsIcon.className = 'verification-icon step-pending';
-                
+                // Step 2: Connecting to payment gateway
                 setTimeout(() => {
-                    let fundsAvailable;
+                    document.getElementById('verification-icon-2').textContent = '✅';
+                    document.getElementById('verification-icon-2').className = 'verification-icon step-completed';
                     
-                    // Determine outcome based on test scenario
-                    if (testScenario === 'funds_fail' || testScenario === 'both_success') {
-                        fundsAvailable = (testScenario === 'both_success');
-                    } else {
-                        fundsAvailable = Math.random() > 0.2; // 80% success rate by default
-                    }
-                    
-                    if (fundsAvailable) {
-                        fundsIcon.textContent = '✅';
-                        fundsIcon.className = 'verification-icon step-completed';
-                        updateOrderStatus('Funds verification successful! POD order created.', 'success');
-                        document.getElementById('deliver-btn').disabled = false;
-                        showNotification('POD order created successfully!');
+                    // Step 3: Processing transaction
+                    setTimeout(() => {
+                        document.getElementById('verification-icon-3').textContent = '✅';
+                        document.getElementById('verification-icon-3').className = 'verification-icon step-completed';
                         
-                        // Store the authorization for later use
-                        userAuthorizationCode = 'auth_' + Math.floor((Math.random() * 1000000000) + 1);
-                        currentOrderReference = 'POD_' + Math.floor((Math.random() * 1000000000) + 1);
-                    } else {
-                        fundsIcon.textContent = '❌';
-                        fundsIcon.className = 'verification-icon step-failed';
-                        updateOrderStatus('Insufficient funds for POD. Please use another payment method.', 'error');
-                        showNotification('Insufficient funds for POD order.');
-                    }
-                }, 2000);
-            } else {
-                cardIcon.textContent = '❌';
-                cardIcon.className = 'verification-icon step-failed';
-                updateOrderStatus('Card verification failed. Please use a valid card.', 'error');
-                showNotification('Card verification failed.');
-            }
-        }, 2000);
-    }, 1000);
-}
+                        // For POD, show additional step
+                        if (currentPaymentMethod === 'pod') {
+                            setTimeout(() => {
+                                document.getElementById('verification-icon-4').textContent = '✅';
+                                document.getElementById('verification-icon-4').className = 'verification-icon step-completed';
+                                completePaymentProcess();
+                            }, 1500);
+                        } else {
+                            completePaymentProcess();
+                        }
+                    }, 1500);
+                }, 1500);
+            }, 1500);
+        }
 
-function updateOrderStatus(message, type) {
-    const statusElement = document.getElementById('order-status');
-    statusElement.innerHTML = `<p>${message}</p>`;
-    statusElement.className = 'status-message ' + type;
-}
-
-function simulateDelivery() {
-    if (currentPaymentMethod === 'pod') {
-        updateOrderStatus('Processing delivery and capturing payment...', 'info');
-        
-        // Simulate API call to capture payment
-        setTimeout(() => {
-            // 95% success rate for payment capture
-            const success = Math.random() > 0.05;
+        function completePaymentProcess() {
+            const cardNumber = document.getElementById('card-number').value.replace(/\s/g, '');
             
-            if (success) {
-                updateOrderStatus('Delivery completed! Payment captured successfully.', 'success');
-                document.getElementById('deliver-btn').disabled = true;
+            // Determine outcome based on card number
+            if (cardNumber.includes('4084084084084081')) {
+                // Successful transaction
+                setTimeout(() => {
+                    document.getElementById('verification-icon-5').textContent = '✅';
+                    document.getElementById('verification-icon-5').className = 'verification-icon step-completed';
+                    
+                    document.getElementById('processingOverlay').style.display = 'none';
+                    
+                    if (currentPaymentMethod === 'pod') {
+                        document.getElementById('order-status').innerHTML = '<p>Pay on Delivery setup successful! Funds have been reserved.</p>';
+                        document.getElementById('order-status').className = 'status-message success';
+                        document.getElementById('delivery-section').style.display = 'block';
+                        showNotification('POD order created successfully! Funds reserved.');
+                    } else {
+                        document.getElementById('order-status').innerHTML = '<p>Payment successful! Your order is being processed.</p>';
+                        document.getElementById('order-status').className = 'status-message success';
+                        showNotification('Payment processed successfully!');
+                        
+                        // Clear cart after successful payment
+                        cart = [];
+                        updateCartDisplay();
+                    }
+                }, 1500);
+            } else {
+                // Failed transaction
+                setTimeout(() => {
+                    document.getElementById('verification-icon-5').textContent = '❌';
+                    document.getElementById('verification-icon-5').className = 'verification-icon step-failed';
+                    
+                    document.getElementById('processingOverlay').style.display = 'none';
+                    
+                    let errorMessage = 'Payment failed. Please try again.';
+                    
+                    if (cardNumber.includes('4084080000000008')) {
+                        errorMessage = 'Payment failed: Insufficient funds.';
+                    } else if (cardNumber.includes('4123450000000009')) {
+                        errorMessage = 'Payment failed: Do not honor.';
+                    } else if (cardNumber.includes('4123450000000017')) {
+                        errorMessage = 'Payment failed: Invalid transaction.';
+                    }
+                    
+                    document.getElementById('order-status').innerHTML = `<p>${errorMessage}</p>`;
+                    document.getElementById('order-status').className = 'status-message error';
+                    showNotification('Payment failed!', false);
+                }, 1500);
+            }
+        }
+
+        function simulateDelivery() {
+            document.getElementById('processingOverlay').style.display = 'flex';
+            document.getElementById('processingText').textContent = 'Capturing payment and completing delivery...';
+            
+            // Simulate API call to capture payment
+            setTimeout(() => {
+                document.getElementById('processingOverlay').style.display = 'none';
+                document.getElementById('order-status').innerHTML = '<p>Delivery completed! Payment captured successfully.</p>';
+                document.getElementById('order-status').className = 'status-message success';
+                document.getElementById('delivery-section').style.display = 'none';
                 showNotification('Delivery completed and payment processed!');
                 
                 // Clear cart after successful delivery
                 cart = [];
                 updateCartDisplay();
-            } else {
-                updateOrderStatus('Payment capture failed. Please try again.', 'error');
-            }
-        }, 2000);
-    } else {
-        // For regular payments, just confirm delivery
-        updateOrderStatus('Delivery completed! Thank you for your order.', 'success');
-        document.getElementById('deliver-btn').disabled = true;
-        showNotification('Delivery completed!');
-        
-        // Clear cart after successful delivery
-        cart = [];
-        updateCartDisplay();
-    }
-}
+            }, 2000);
+        }
 
-// Initialize the app
-document.addEventListener('DOMContentLoaded', function() {
-    updateCartDisplay();
-});
+        function fillCard(number, expiry, cvv) {
+            document.getElementById('card-number').value = number;
+            document.getElementById('card-expiry').value = expiry;
+            document.getElementById('card-cvv').value = cvv;
+            document.getElementById('cardholder-name').value = 'Test Customer';
+            document.getElementById('card-email').value = 'customer@example.com';
+            showNotification(`Card ${number} filled for testing`);
+        }
