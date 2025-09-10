@@ -290,8 +290,6 @@ function simulateVerificationProcess() {
                 // For POD, show additional step
                 if (currentPaymentMethod === 'pod') {
                     setTimeout(() => {
-                        document.getElementById('verification-icon-4').textContent = '✅';
-                        document.getElementById('verification-icon-4').className = 'verification-icon step-completed';
                         completePaymentProcess();
                     }, 1500);
                 } else {
@@ -309,6 +307,12 @@ function completePaymentProcess() {
     if (cardNumber.includes('4084084084084081')) {
         // Successful transaction
         setTimeout(() => {
+            // For POD, update the reserve funds status
+            if (currentPaymentMethod === 'pod') {
+                document.getElementById('verification-icon-4').textContent = '✅';
+                document.getElementById('verification-icon-4').className = 'verification-icon step-completed';
+            }
+            
             document.getElementById('verification-icon-5').textContent = '✅';
             document.getElementById('verification-icon-5').className = 'verification-icon step-completed';
             
@@ -332,6 +336,12 @@ function completePaymentProcess() {
     } else {
         // Failed transaction
         setTimeout(() => {
+            // For POD, update the reserve funds status to failed
+            if (currentPaymentMethod === 'pod') {
+                document.getElementById('verification-icon-4').textContent = '❌';
+                document.getElementById('verification-icon-4').className = 'verification-icon step-failed';
+            }
+            
             document.getElementById('verification-icon-5').textContent = '❌';
             document.getElementById('verification-icon-5').className = 'verification-icon step-failed';
             
@@ -340,7 +350,7 @@ function completePaymentProcess() {
             let errorMessage = 'Payment failed. Please try again.';
             
             if (cardNumber.includes('4084080000000008')) {
-                errorMessage = 'Payment failed: Insufficient funds.';
+                errorMessage = 'Payment failed: Insufficient funds. Cannot reserve funds for Pay on Delivery.';
             } else if (cardNumber.includes('4123450000000009')) {
                 errorMessage = 'Payment failed: Do not honor.';
             } else if (cardNumber.includes('4123450000000017')) {
